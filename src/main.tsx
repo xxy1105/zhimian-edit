@@ -5,6 +5,7 @@ import { ConfigProvider, App as AntApp } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import App from './App';
 import { AppProvider } from './context/AppContext';
+import { DataProvider } from './context/DataContext';
 import './styles.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -23,7 +24,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         Card:{headerFontSize:15},
       },
     }}>
-      <AntApp><AppProvider><HashRouter><App /></HashRouter></AppProvider></AntApp>
+      <AntApp><AppProvider><DataProvider><HashRouter><App /></HashRouter></DataProvider></AppProvider></AntApp>
     </ConfigProvider>
   </React.StrictMode>,
 );

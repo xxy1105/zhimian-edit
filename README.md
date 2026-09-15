@@ -1,57 +1,85 @@
-# 智面智能面试管理后台
+# 智面 ATS 管理控制台
 
-React + TypeScript + Vite + Ant Design 的高保真 PC Web 演示原型。
+面向招聘项目、岗位、候选人和面试流程的全栈演示系统。前端使用 React、TypeScript、Vite 和 Ant Design，后端使用 Express，并通过 JSON 文件持久化测试数据。
 
 ## 启动
 
+要求 Node.js 22 或更高版本。
+
 ```bash
 npm install
+npm run db:reset
 npm run dev
 ```
 
-## 主要演示路径
+- Web：http://localhost:5173
+- API：http://127.0.0.1:3001/api
+- 健康检查：http://127.0.0.1:3001/api/health
 
-1. `/dashboard` 查看招聘指标、漏斗、趋势、项目排行和异常预警。
-2. `/projects` 查看项目表格/看板、筛选、导入导出和详情。
-3. `/jobs` 查看岗位、HC 缺口、成员配置和状态。
-4. `/interviews/invite` 完成候选人选择、AI 面试配置、通知确认和发起结果。
-5. `/interviews/process` 查看面试进程并打开实时监控。
-6. `/interviews/review` 审核 AI 结果并推进下一轮或释放公海。
-7. `/calendar` 安排人工面试并演示冲突检测。
-8. `/analytics/overview` 点击 KPI 或图表下钻 `/analytics/detail`。
+`npm run dev` 会同时启动前端和 API。测试数据库位于 `server/data/db.json`，该文件由种子脚本生成且不会提交到 Git。
 
-## 路由
+## 常用命令
 
-- 工作台：`/dashboard`
-- 面试控制台：`/interviews/invite`、`/interviews/process`、`/interviews/exceptions`、`/interviews/review`、`/interviews/passed`
-- 项目岗位：`/projects`、`/projects/:id`、`/jobs`、`/approvals`
-- 题库评分：`/questions`、`/score-templates`
-- 面试台账：`/records`、`/calendar`
-- 数据看板：`/analytics/overview`、`/analytics/projects`、`/analytics/jobs`、`/analytics/interviews`、`/analytics/detail`
-- 人才库：`/talent/public`、`/talent/private`、`/talent/incomplete`、`/talent/blacklist`、`/talent/onboarded`
-- 通知下载：`/notifications`、`/downloads`、`/updates`
-- 系统管理：`/users`、`/organization`、`/roles`、`/settings/templates`、`/settings/audit`、`/settings/system`
+```bash
+npm run dev          # 同时启动前端与 API
+npm run dev:web      # 只启动前端
+npm run dev:api      # 只启动 API
+npm run db:reset     # 重置测试数据库
+npm test             # 运行 API 集成测试
+npm run build        # 前后端类型检查并构建前端
+```
 
-## 复用组件
+## 已实现能力
 
-- `BusinessList`：统计、筛选、表格/看板、分页、批量选择和工具栏。
-- `StatCard`、`StatusTag`、`PageHeader`：统一指标与状态视觉。
-- `ImportWizard`、`ExportModal`：四步导入与权限感知导出。
-- `DetailDrawer`、`EmptyState`、`LoadingBlock`：详情和公共状态。
-- `AppLayout`：导航、搜索、快捷创建、角色切换、403 和数据范围。
+- 项目、岗位、候选人、题库、评分模板和用户等通用 CRUD。
+- 批量选择、删除、归档、复制、Excel 导入与 CSV 导出。
+- 候选人邀约、异常链接重发、面试审核和最终结果提交。
+- 二轮飞书会议创建、会议结果同步和面试台账写入。
+- 人工面试日历新增、改期与参会人维护。
+- 角色只读权限、外部客户数据范围过滤和路由访问控制。
+- 通知模板、系统配置、飞书连接检查和审计记录。
+- 文件持久化种子数据与 API 集成测试。
 
-## Mock 与权限
+## API
 
-数据统一位于 `src/services/mock.ts`，接口通过 `mockService` 暴露，可直接替换为真实请求。项目、岗位、候选人和面试记录使用共享数据关系。
+通用资源：
 
-顶部角色选择器可切换 8 类角色。`AppContext` 提供数据范围和编辑权限，`AppLayout` 根据角色同步收敛导航和直接路由访问；数据观察员、外部客户等角色会看到只读按钮、权限原因或 403 申请入口。
+```text
+GET    /api/:resource
+GET    /api/:resource/:key
+POST   /api/:resource
+PATCH  /api/:resource/:key
+DELETE /api/:resource/:key
+```
 
-## GitHub Pages 部署
+业务接口：
 
-项目使用 Hash 路由和相对静态资源路径，兼容 GitHub Pages 项目站点。
+```text
+GET   /api/bootstrap
+GET   /api/dashboard
+GET   /api/search?q=keyword
+GET   /api/exports/:resource
+POST  /api/interviews/invite
+POST  /api/interviews/:key/reissue
+POST  /api/interviews/:key/review
+POST  /api/interviews/:key/complete
+POST  /api/meetings
+POST  /api/meetings/:key/sync
+PATCH /api/settings
+POST  /api/integrations/feishu/test
+```
 
-推送到 `main` 分支后，`.github/workflows/deploy-pages.yml` 会自动：
+角色通过 URL 编码后的 `x-role` 请求头传递。`数据观察员`和`外部客户`不能执行写操作。
 
-1. 安装 Node.js 22 和项目依赖。
-2. 执行 `npm run build`。
-3. 将 `dist` 上传并发布到 GitHub Pages。
+## 数据说明
+
+`server/seed.ts` 提供可重复生成的测试数据，包括：
+
+- 8 个招聘项目
+- 8 个岗位
+- 36 名候选人
+- 10 条基础面试记录
+- 24 道面试题
+- 审批、通知、下载、版本、日历、模板和审计数据
+
+本地文件存储用于零配置演示。生产环境应将 `Store` 替换为数据库仓储，并在服务端接入真实身份认证、对象存储和飞书开放平台凭证。

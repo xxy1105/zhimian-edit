@@ -7,12 +7,15 @@ import {
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { PageHeader, StatCard, StatusTag } from '../components/Common';
-import { funnelData, projects, trendData } from '../services/mock';
+import { funnelData, trendData, type Project } from '../services/mock';
 import { useApp } from '../context/AppContext';
+import { useData } from '../context/DataContext';
 
 export function Dashboard() {
   const navigate = useNavigate();
   const { dataScope } = useApp();
+  const {projects:projectRecords,jobs,interviews}=useData();
+  const projects=projectRecords as unknown as Project[];
   const [project, setProject] = useState('all');
   const [trendTypes, setTrendTypes] = useState<string[]>(['邀约量','完成量']);
   const trendSeries = trendData.flatMap(x=>[
@@ -31,27 +34,27 @@ export function Dashboard() {
   };
   return <div>
     <div className="welcome-bar">
-      <div><span>2026 年 9 月 3 日 · 星期四</span><h1>下午好，周谨言</h1><p>当前数据范围：{dataScope}</p></div>
+      <div><span>{new Intl.DateTimeFormat('zh-CN',{dateStyle:'full'}).format(new Date())}</span><h1>你好，周谨言</h1><p>当前数据范围：{dataScope}</p></div>
       <Space><Button icon={<RocketOutlined />} type="primary" onClick={()=>navigate('/interviews/invite')}>发起邀约</Button><Button icon={<PlusOutlined />} onClick={()=>navigate('/jobs')}>新建岗位</Button><Button icon={<ArrowRightOutlined />} onClick={()=>navigate('/analytics/overview')}>查看数据看板</Button></Space>
     </div>
     <div className="dashboard-filter">
-      <Space><DatePicker.RangePicker /><Select value={project} onChange={setProject} style={{width:240}} options={[{value:'all',label:'全部项目'},...projects.slice(0,3).map(x=>({value:x.key,label:x.name}))]} /><Select placeholder="全部岗位" style={{width:180}} options={[{value:'all',label:'全部岗位'}]} /></Space>
-      <span><SyncOutlined /> 数据更新于 16:50</span>
+      <Space><DatePicker.RangePicker /><Select value={project} onChange={setProject} style={{width:240}} options={[{value:'all',label:'全部项目'},...projects.map(x=>({value:x.key,label:x.name}))]} /><Select placeholder="全部岗位" style={{width:180}} options={[{value:'all',label:'全部岗位'},...jobs.map(item=>({value:item.key,label:String(item.name)}))]} /></Space>
+      <span><SyncOutlined /> 数据已实时同步</span>
     </div>
     <Row gutter={12} className="stats-row five">
-      <Col flex="1"><StatCard label="累计面试人数" value="12,680" trend="+18.6%" onClick={()=>navigate('/records')} /></Col>
-      <Col flex="1"><StatCard label="进行中项目" value="18" trend="+2" tone="cyan" onClick={()=>navigate('/projects?status=进行中')} /></Col>
-      <Col flex="1"><StatCard label="招聘中岗位" value="46" trend="+6" tone="green" onClick={()=>navigate('/jobs?status=招聘中')} /></Col>
-      <Col flex="1"><StatCard label="AI 面试完成量" value="8,946" trend="+21.3%" tone="violet" onClick={()=>navigate('/records?type=AI')} /></Col>
-      <Col flex="1"><StatCard label="本月节省人工时长" value="1,286h" trend="+16.2%" tone="orange" onClick={()=>navigate('/analytics/interviews')} /></Col>
+      <Col flex="1"><StatCard label="累计面试人数" value={interviews.length} onClick={()=>navigate('/records')} /></Col>
+      <Col flex="1"><StatCard label="进行中项目" value={projects.filter(item=>item.status==='进行中').length} tone="cyan" onClick={()=>navigate('/projects?status=进行中')} /></Col>
+      <Col flex="1"><StatCard label="招聘中岗位" value={jobs.filter(item=>item.status==='招聘中').length} tone="green" onClick={()=>navigate('/jobs?status=招聘中')} /></Col>
+      <Col flex="1"><StatCard label="AI 面试完成量" value={interviews.filter(item=>/完成|审核|通过/.test(String(item.status))).length} tone="violet" onClick={()=>navigate('/records?type=AI')} /></Col>
+      <Col flex="1"><StatCard label="本月节省人工时长" value={`${Math.round(interviews.length*0.6)}h`} tone="orange" onClick={()=>navigate('/analytics/interviews')} /></Col>
     </Row>
     <Card className="overview-strip" title="今日运行概览">
       <div className="overview-items">
-        {[['今日待面试','86','blue'],['面试中','12','cyan'],['待审核','28','orange'],['异常数量','7','red'],['24 小时内过期','16','gold']].map(x=><div key={x[0]} onClick={()=>navigate('/interviews/process')}><span className={`dot ${x[2]}`} /><b>{x[1]}</b><small>{x[0]}</small></div>)}
+        {[['今日待面试',interviews.filter(item=>item.status==='待面试').length,'blue'],['面试中',interviews.filter(item=>item.status==='面试中').length,'cyan'],['待审核',interviews.filter(item=>item.status==='待审核').length,'orange'],['异常数量',interviews.filter(item=>item.risk).length,'red'],['24 小时内过期',interviews.filter(item=>String(item.risk).includes('过期')).length,'gold']].map(x=><div key={x[0]} onClick={()=>navigate('/interviews/process')}><span className={`dot ${x[2]}`} /><b>{x[1]}</b><small>{x[0]}</small></div>)}
       </div>
     </Card>
     <Row gutter={16}>
-      <Col span={15}><Card title="招聘转化漏斗" extra={<Tooltip title="点击任一阶段查看明细"><Button type="link">查看明细</Button></Tooltip>} className="chart-card">
+      <Col span={15}><Card title="招聘转化漏斗" extra={<Tooltip title="点击查看明细"><Button type="link" onClick={()=>navigate('/analytics/detail?source=dashboard&metric=funnel')}>查看明细</Button></Tooltip>} className="chart-card">
         <Funnel data={funnelData} xField="stage" yField="value" shape="funnel" colorField="stage" style={{fillOpacity:0.88}} onReady={chart=>chart.on('element:click',()=>navigate('/analytics/detail?source=dashboard&metric=funnel'))} />
       </Card></Col>
       <Col span={9}><Card title="项目进度排行" extra={<Button type="link" onClick={()=>navigate('/projects')}>全部项目</Button>} className="chart-card">

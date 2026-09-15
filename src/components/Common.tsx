@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { readSheet } from 'read-excel-file/browser';
 import {
   Alert, Button, Card, Checkbox, Descriptions, Divider, Drawer, Empty, Form,
   Input, message, Modal, Progress, Result, Select, Space, Spin, Steps, Table,
@@ -53,7 +54,7 @@ export function DetailDrawer({ open, onClose, title, record }: {
 }) {
   return (
     <Drawer open={open} onClose={onClose} width={620} title={title} extra={<Button type="primary">查看完整详情</Button>}>
-      <Alert type="info" showIcon message="信息来自 Mock Service，可替换为真实接口" />
+      <Alert type="info" showIcon message="信息来自智面 ATS API，变更会持久化到本地数据文件" />
       <Descriptions column={1} bordered size="small" style={{ marginTop:16 }}>
         {Object.entries(record || {}).filter(([k]) => k !== 'key').slice(0, 10).map(([k,v]) =>
           <Descriptions.Item key={k} label={k}>{String(v)}</Descriptions.Item>)}
@@ -68,22 +69,64 @@ export function DetailDrawer({ open, onClose, title, record }: {
   );
 }
 
-export function ImportWizard({ open, onClose }: { open:boolean; onClose:()=>void }) {
+const importFieldMap:Record<string,string>={
+  '名称':'name','项目名称':'name','岗位名称':'name','候选人姓名':'name','姓名':'name',
+  '手机号':'contact','联系电话':'contact','邮箱':'email','客户':'client','客户 / 业务线':'client',
+  '负责人':'owner','项目经理':'manager','所属项目':'project','目标项目':'project',
+  '所属岗位':'job','目标岗位':'job','应聘职位':'job','状态':'status','目标人数':'target','HC':'hc',
+};
+
+export function ImportWizard({ open, onClose, onImport }: {
+  open:boolean;
+  onClose:()=>void;
+  onImport?:(rows:Record<string,unknown>[])=>Promise<void>;
+}) {
   const [step, setStep] = useState(0);
-  const finish = () => { message.success('导入完成：成功 8 条，失败 2 条'); setStep(3); };
+  const [rows,setRows]=useState<Record<string,unknown>[]>([]);
+  const [headers,setHeaders]=useState<string[]>([]);
+  const [fileName,setFileName]=useState('');
+  const [importing,setImporting]=useState(false);
+  const close=()=>{setStep(0);setRows([]);setHeaders([]);setFileName('');onClose();};
+  const parseFile=async(file:File)=>{
+    const matrix=await readSheet(file);
+    const sourceHeaders=(matrix[0]||[]).map(value=>String(value||'').trim()).filter(Boolean);
+    const parsed=matrix.slice(1).filter(row=>row.some(Boolean)).map((row,index)=>Object.fromEntries(sourceHeaders.map((header,column)=>[
+      importFieldMap[header]||header,
+      row[column]??'',
+    ]).concat([['importRow',index+2]])));
+    setHeaders(sourceHeaders);
+    setRows(parsed);
+    setFileName(file.name);
+    setStep(1);
+  };
+  const finish=async()=>{
+    if(!rows.length)return;
+    setImporting(true);
+    try{
+      await onImport?.(rows.map(({importRow:_,...row})=>row));
+      message.success(`导入完成：成功 ${rows.length} 条`);
+      setStep(3);
+    }finally{setImporting(false);}
+  };
+  const downloadTemplate=()=>{
+    const content='\uFEFF名称,负责人,状态\n示例数据,周谨言,草稿\n';
+    const url=URL.createObjectURL(new Blob([content],{type:'text/csv;charset=utf-8'}));
+    const anchor=document.createElement('a');
+    anchor.href=url;anchor.download='智面导入模板.csv';anchor.click();URL.revokeObjectURL(url);
+  };
   return (
-    <Modal open={open} onCancel={onClose} width={760} title="导入 Excel" footer={[
-      <Button key="cancel" onClick={onClose}>取消</Button>,
+    <Modal open={open} onCancel={close} width={760} title="导入 Excel" footer={[
+      <Button key="cancel" onClick={close}>取消</Button>,
       step > 0 && <Button key="back" onClick={()=>setStep(step-1)}>上一步</Button>,
-      step < 3 && <Button key="next" type="primary" onClick={()=>step === 2 ? finish() : setStep(step+1)}>{step===2?'开始导入':'下一步'}</Button>,
-      step === 3 && <Button key="done" type="primary" onClick={onClose}>查看数据</Button>,
+      step < 3 && <Button key="next" type="primary" loading={importing} disabled={!rows.length} onClick={()=>step === 2 ? void finish() : setStep(step+1)}>{step===2?'开始导入':'下一步'}</Button>,
+      step === 3 && <Button key="done" type="primary" onClick={close}>查看数据</Button>,
     ]}>
       <Steps current={step} size="small" items={['上传文件','字段映射','数据预览','导入结果'].map(title=>({title}))} />
       <div className="wizard-content">
-        {step === 0 && <><Button icon={<DownloadOutlined />}>下载固定模板</Button><Upload.Dragger accept=".xlsx,.xls" beforeUpload={()=>false} style={{marginTop:16}}><p className="ant-upload-drag-icon"><InboxOutlined /></p><p>拖拽 Excel 文件到此处，或点击上传</p><p className="hint">支持 .xlsx/.xls，文件不超过 20MB</p></Upload.Dragger></>}
-        {step === 1 && <Form layout="vertical"><Alert message="已自动识别 9 个字段，其中 3 个必填字段" type="success" showIcon/><div className="mapping-row"><b>候选人姓名 *</b><span>→</span><Select value="姓名" options={[{value:'姓名'}]} /></div><div className="mapping-row"><b>手机号 *</b><span>→</span><Select value="联系电话" options={[{value:'联系电话'}]} /></div><div className="mapping-row"><b>目标岗位 *</b><span>→</span><Select value="应聘职位" options={[{value:'应聘职位'}]} /></div></Form>}
-        {step === 2 && <><Alert message="共 10 条：8 条可导入，1 条重复，1 条格式错误" type="warning" showIcon/><Table size="small" pagination={false} dataSource={[{key:1,name:'江予安',phone:'138****2468',result:'可导入'},{key:2,name:'孟书瑶',phone:'139****6712',result:'疑似重复'},{key:3,name:'程砚秋',phone:'手机号格式错误',result:'错误'}]} columns={[{title:'姓名',dataIndex:'name'},{title:'手机号',dataIndex:'phone'},{title:'检测结果',dataIndex:'result',render:(value:string)=><StatusTag status={value} />}]} /></>}
-        {step === 3 && <Result status="warning" title="部分导入成功" subTitle="成功 8 条，失败 2 条，已生成导入报告" extra={<Button icon={<FileExcelOutlined />}>下载失败明细</Button>} />}
+        {step === 0 && <><Button icon={<DownloadOutlined />} onClick={downloadTemplate}>下载导入模板</Button><Upload.Dragger accept=".xlsx" maxCount={1} beforeUpload={file=>{void parseFile(file);return false;}} style={{marginTop:16}}><p className="ant-upload-drag-icon"><InboxOutlined /></p><p>拖拽 Excel 文件到此处，或点击上传</p><p className="hint">支持 .xlsx，首行为字段名，文件不超过 20MB</p></Upload.Dragger></>}
+        {step === 1 && <><Alert message={`已读取 ${fileName}，识别 ${headers.length} 个字段、${rows.length} 条数据`} type="success" showIcon/>{headers.map(header=><div className="mapping-row" key={header}><b>{header}</b><span>→</span><Tag color="blue">{importFieldMap[header]||header}</Tag></div>)}</>}
+        {step === 2 && <><Alert message={`共 ${rows.length} 条数据，确认后将写入 API`} type="info" showIcon/><Table size="small" pagination={{pageSize:5}} dataSource={rows.map((row,index)=>({...row,key:index}))} columns={headers.slice(0,5).map(header=>({title:header,dataIndex:importFieldMap[header]||header,ellipsis:true}))} /></>}
+        {step === 3 && <Result status="success" title="导入成功" subTitle={`${rows.length} 条数据已持久化`} extra={<Button icon={<FileExcelOutlined />} onClick={close}>返回列表</Button>} />}
       </div>
     </Modal>
   );
