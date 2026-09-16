@@ -147,7 +147,6 @@ export function createSeedDatabase(): Database {
     templates,
     auditLogs,
     settings: {
-      callbackUrl: 'http://127.0.0.1:3001/api/webhooks/interview-provider',
       ssoEnabled: true,
       sessionHours: 8,
       dataRetentionDays: 365,

@@ -50,9 +50,9 @@ export const navigation: NavItem[] = [
 export const pageMeta: Record<string, { title:string; description:string; icon?:ReactNode }> = {
   '/dashboard': { title:'首页工作台', description:'招聘运营核心指标与今日任务概览' },
   '/interviews/invite': { title:'发起邀约', description:'选择候选人并配置首轮 AI 面试' },
-  '/interviews/process': { title:'进程管理', description:'跟踪面试状态、实时进度与异常提醒' },
-  '/interviews/exceptions': { title:'废弃与异常', description:'处理过期链接、发送失败和评分异常' },
-  '/interviews/review': { title:'待审核', description:'审核 AI 面试结果并推进候选人流程' },
+  '/interviews/process': { title:'进程管理', description:'跟踪面试状态、在线心跳、转录与录像结果' },
+  '/interviews/exceptions': { title:'废弃与异常', description:'处理过期链接、面试中断、转录与录像异常' },
+  '/interviews/review': { title:'待审核', description:'审核逐题转录与录像并推进候选人流程' },
   '/interviews/passed': { title:'面试通过', description:'安排后续轮次、客户面与 Offer 审批' },
   '/projects': { title:'项目管理', description:'管理招聘项目、目标进度和审批状态' },
   '/jobs': { title:'岗位管理', description:'配置岗位、成员权限与面试流程' },

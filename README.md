@@ -37,7 +37,7 @@ npm run build        # 前后端类型检查并构建前端
 - 项目、岗位、候选人、题库、评分模板和用户等通用 CRUD。
 - 批量选择、删除、归档、复制、Excel 导入与 CSV 导出。
 - 基于 HttpOnly 签名会话的登录、服务端 RBAC 和项目/岗位数据范围。
-- AI 面试 Provider 创建链接、保留历史的链接重发、控制、主动结果同步及 Webhook。
+- 面试执行引擎创建/作废链接、保留历史的链接重发，以及逐题转录和录像结果同步。
 - 飞书官方 SDK 创建视频会议预约、查询会议详情和录制结果。
 - 人工面试日历新增、改期与参会人维护。
 - PostgreSQL 共享存储；本地 JSON 仅用于开发。
@@ -69,7 +69,7 @@ GET   /api/search?q=keyword
 GET   /api/exports/:resource
 POST  /api/interviews/invite
 POST  /api/interviews/:key/reissue
-POST  /api/interviews/:key/control
+POST  /api/interviews/:key/control     # 当前仅支持 action=cancel
 POST  /api/interviews/:key/sync-result
 POST  /api/interviews/:key/review
 POST  /api/interviews/:key/complete
@@ -78,12 +78,11 @@ POST  /api/meetings/:key/sync
 PATCH /api/settings
 POST  /api/integrations/feishu/test
 POST  /api/resumes/parse
-POST  /api/webhooks/interview-provider
 ```
 
 业务接口使用 HttpOnly Cookie 登录会话。客户端不能指定或切换角色。
 
-AI 面试平台的详细字段和签名规范见 [Provider 接口契约](docs/interview-provider-contract.md)。
+面试执行引擎的 API Key、创建字段和结果映射见 [Provider 接口契约](docs/interview-provider-contract.md)。
 
 ## 数据说明
 

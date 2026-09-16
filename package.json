@@ -10,7 +10,7 @@
     "start:api": "tsx server/index.ts",
     "build": "tsc -b && tsc -p server/tsconfig.json --noEmit && vite build",
     "preview": "vite preview",
-    "test": "node --import tsx --test server/app.test.ts",
+    "test": "node --import tsx --test server/*.test.ts",
     "db:reset": "tsx server/reset.ts"
   },
   "dependencies": {

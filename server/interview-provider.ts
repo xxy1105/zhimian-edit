@@ -1,20 +1,21 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
-
 export type CreateInterviewInput = {
   requestId: string;
   candidate: {
     id: string;
     name: string;
-    mobile?: string;
     email?: string;
+    resumeText?: string;
   };
   project: string;
   job: string;
-  questionBankId?: string;
-  scoreTemplateId?: string;
+  jdText: string;
+  focusAreas?: string[];
+  defaultDifficulty?: string;
+  firstQuestion?: string;
+  firstQuestionKeywords?: string;
+  lastQuestion?: string;
+  lastQuestionKeywords?: string;
   expiresAt: string;
-  callbackUrl: string;
-  metadata: Record<string, string>;
 };
 
 export type ProviderInterview = {
@@ -23,24 +24,28 @@ export type ProviderInterview = {
   accessToken?: string;
   expiresAt: string;
   status: string;
-  raw?: unknown;
+};
+
+export type ProviderQaRecord = {
+  id?: string;
+  question?: string;
+  candidateAnswer?: string;
+  recordingUrl?: string;
+  recordingStatus?: string;
 };
 
 export type ProviderResult = {
   providerInterviewId: string;
   status: string;
-  score?: number;
-  summary?: string;
-  transcriptUrl?: string;
+  connectionStatus?: string;
+  qaRecords: ProviderQaRecord[];
   recordingUrl?: string;
-  dimensions?: Array<{ name: string; score: number; comment?: string }>;
-  raw?: unknown;
 };
 
 export interface InterviewProvider {
   create(input: CreateInterviewInput): Promise<ProviderInterview>;
-  regenerate(providerInterviewId: string, expiresAt: string): Promise<ProviderInterview>;
-  control(providerInterviewId: string, action: string, value?: number): Promise<void>;
+  regenerate(providerInterviewId: string, input: CreateInterviewInput): Promise<ProviderInterview>;
+  cancel(providerInterviewId: string): Promise<void>;
   getResult(providerInterviewId: string): Promise<ProviderResult>;
 }
 
@@ -48,7 +53,7 @@ export class ProviderNotConfiguredError extends Error {
   status = 503;
 
   constructor() {
-    super('AI 面试服务尚未配置，请提供 Provider Base URL、鉴权和字段映射');
+    super('AI 面试服务尚未配置，请设置 Provider Base URL 和 API Key');
   }
 }
 
@@ -56,12 +61,12 @@ function providerConfig() {
   return {
     baseUrl: process.env.INTERVIEW_PROVIDER_BASE_URL?.replace(/\/$/, ''),
     apiKey: process.env.INTERVIEW_PROVIDER_API_KEY,
-    createPath: process.env.INTERVIEW_PROVIDER_CREATE_PATH || '/interviews',
+    adminPath: process.env.INTERVIEW_PROVIDER_ADMIN_PATH || '/api/admin/interview-links',
     timeout: Number(process.env.INTERVIEW_PROVIDER_TIMEOUT_MS || 15000),
   };
 }
 
-async function providerRequest(path: string, init: RequestInit) {
+async function providerRequest(path: string, init: RequestInit = {}) {
   const config = providerConfig();
   if (!config.baseUrl || !config.apiKey) throw new ProviderNotConfiguredError();
   const controller = new AbortController();
@@ -72,14 +77,14 @@ async function providerRequest(path: string, init: RequestInit) {
       signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.apiKey}`,
+        'X-API-Key': config.apiKey,
         ...init.headers,
       },
     });
-    const payload = await response.json().catch(() => ({}));
+    const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
     if (!response.ok) {
-      const error = new Error(String(payload.message || payload.msg || `面试平台返回 ${response.status}`)) as Error & { status?: number };
-      error.status = 502;
+      const error = new Error(String(payload.error || payload.message || `面试引擎返回 ${response.status}`)) as Error & { status?: number };
+      error.status = response.status === 401 ? 502 : response.status >= 500 ? 502 : response.status;
       throw error;
     }
     return payload;
@@ -88,70 +93,120 @@ async function providerRequest(path: string, init: RequestInit) {
   }
 }
 
-function normalizeInterview(payload: Record<string, unknown>): ProviderInterview {
-  const data = (payload.data || payload.result || payload) as Record<string, unknown>;
-  const providerInterviewId = String(data.providerInterviewId || data.interviewId || data.id || '');
-  const interviewUrl = String(data.interviewUrl || data.url || data.link || '');
-  const expiresAt = String(data.expiresAt || data.expireTime || data.expiredAt || '');
+function optionalString(value: unknown) {
+  return value === undefined || value === null || value === '' ? undefined : String(value);
+}
+
+function normalizeStatus(value: unknown) {
+  const status = String(value || 'UNKNOWN');
+  if (['completed', 'complete', 'finished', 'done', '已完成'].includes(status.toLowerCase())) return 'COMPLETED';
+  return status.toUpperCase();
+}
+
+function resolveInterviewUrl(value: unknown) {
+  const url = String(value || '');
+  if (!url) return '';
+  try {
+    const resolved = new URL(url, `${providerConfig().baseUrl}/`);
+    if (!['http:', 'https:'].includes(resolved.protocol)) {
+      throw new Error('unsupported protocol');
+    }
+    return resolved.toString();
+  } catch {
+    throw Object.assign(new Error('面试引擎返回了无效的 URL'), { status: 502 });
+  }
+}
+
+function normalizeInterview(payload: Record<string, unknown>, fallbackExpiresAt: string): ProviderInterview {
+  const item = (payload.item || payload.data || payload.result || payload) as Record<string, unknown>;
+  const providerInterviewId = String(item.id || item.interview_link_id || item.interviewLinkId || '');
+  const interviewUrl = resolveInterviewUrl(payload.interviewUrl || payload.interview_url || item.interviewUrl || item.interview_url || item.url);
   if (!providerInterviewId || !interviewUrl) {
-    throw Object.assign(new Error('面试平台响应缺少 providerInterviewId 或 interviewUrl'), { status: 502 });
+    throw Object.assign(new Error('面试引擎响应缺少 item.id 或 interviewUrl'), { status: 502 });
   }
   return {
     providerInterviewId,
     interviewUrl,
-    accessToken: data.accessToken ? String(data.accessToken) : undefined,
-    expiresAt,
-    status: String(data.status || 'PENDING'),
-    raw: payload,
+    accessToken: optionalString(item.token),
+    expiresAt: String(item.expires_at || item.expiresAt || fallbackExpiresAt),
+    status: normalizeStatus(item.status || item.connection_status || 'PENDING'),
+  };
+}
+
+function createPayload(input: CreateInterviewInput) {
+  const expiresInDays = Math.max(1, Math.ceil((new Date(input.expiresAt).getTime() - Date.now()) / 86400000));
+  return {
+    candidate_name: input.candidate.name,
+    candidate_email: input.candidate.email,
+    resume_text: input.candidate.resumeText,
+    jd_title: input.job,
+    jd_text: input.jdText,
+    focus_areas: input.focusAreas,
+    default_difficulty: input.defaultDifficulty || process.env.INTERVIEW_PROVIDER_DEFAULT_DIFFICULTY || 'medium',
+    first_question: input.firstQuestion || process.env.INTERVIEW_PROVIDER_FIRST_QUESTION,
+    first_question_keywords: input.firstQuestionKeywords || process.env.INTERVIEW_PROVIDER_FIRST_QUESTION_KEYWORDS,
+    last_question: input.lastQuestion || process.env.INTERVIEW_PROVIDER_LAST_QUESTION,
+    last_question_keywords: input.lastQuestionKeywords || process.env.INTERVIEW_PROVIDER_LAST_QUESTION_KEYWORDS,
+    auto_next: process.env.INTERVIEW_PROVIDER_AUTO_NEXT !== 'false',
+    next_break_seconds: Number(process.env.INTERVIEW_PROVIDER_NEXT_BREAK_SECONDS || 30),
+    tts_voice: process.env.INTERVIEW_PROVIDER_TTS_VOICE || 'zh_female_xiaohe_uranus_bigtts',
+    expires_in_days: expiresInDays,
+    max_interview_duration: Number(process.env.INTERVIEW_PROVIDER_MAX_DURATION_SECONDS || 1800),
+    interview_timeout: Number(process.env.INTERVIEW_PROVIDER_TIMEOUT_SECONDS || 60),
+    interviewer_name: process.env.INTERVIEW_PROVIDER_INTERVIEWER_NAME || 'AI·嘉欣',
   };
 }
 
 export class HttpInterviewProvider implements InterviewProvider {
   async create(input: CreateInterviewInput) {
     const config = providerConfig();
-    return normalizeInterview(await providerRequest(config.createPath, {
+    return normalizeInterview(await providerRequest(config.adminPath, {
       method: 'POST',
       headers: { 'Idempotency-Key': input.requestId },
-      body: JSON.stringify(input),
-    }));
+      body: JSON.stringify(createPayload(input)),
+    }), input.expiresAt);
   }
 
-  async regenerate(providerInterviewId: string, expiresAt: string) {
-    return normalizeInterview(await providerRequest(`/interviews/${encodeURIComponent(providerInterviewId)}/link/regenerate`, {
-      method: 'POST',
-      body: JSON.stringify({ expiresAt }),
-    }));
+  async regenerate(providerInterviewId: string, input: CreateInterviewInput) {
+    const replacement = await this.create(input);
+    try {
+      await this.cancel(providerInterviewId);
+      return replacement;
+    } catch (error) {
+      await this.cancel(replacement.providerInterviewId).catch(() => undefined);
+      throw error;
+    }
   }
 
-  async control(providerInterviewId: string, action: string, value?: number) {
-    await providerRequest(`/interviews/${encodeURIComponent(providerInterviewId)}/${encodeURIComponent(action)}`, {
-      method: 'POST',
-      body: JSON.stringify(value === undefined ? {} : { value }),
-    });
+  async cancel(providerInterviewId: string) {
+    const config = providerConfig();
+    await providerRequest(`${config.adminPath}/${encodeURIComponent(providerInterviewId)}`, { method: 'DELETE' });
   }
 
   async getResult(providerInterviewId: string): Promise<ProviderResult> {
-    const payload = await providerRequest(`/interviews/${encodeURIComponent(providerInterviewId)}/result`, { method: 'GET' });
-    const data = (payload.data || payload.result || payload) as Record<string, unknown>;
+    const config = providerConfig();
+    const payload = await providerRequest(`${config.adminPath}/${encodeURIComponent(providerInterviewId)}`);
+    const link = (payload.link || {}) as Record<string, unknown>;
+    const qaRecords = (Array.isArray(payload.qaRecords) ? payload.qaRecords : [])
+      .map((record) => record as Record<string, unknown>)
+      .map((record) => ({
+        id: optionalString(record.id || record.qa_id),
+        question: optionalString(record.question || record.question_text),
+        candidateAnswer: optionalString(record.candidate_answer || record.candidateAnswer),
+        recordingUrl: record.recording_url || record.recordingUrl
+          ? resolveInterviewUrl(record.recording_url || record.recordingUrl)
+          : undefined,
+        recordingStatus: optionalString(record.recording_status || record.recordingStatus),
+      }));
+    const completed = link.is_completed === true
+      || Boolean(link.completed_at || link.completedAt || link.finished_at || link.finishedAt);
+    const statusValue = link.status || link.interview_status || (completed ? 'COMPLETED' : link.connection_status);
     return {
       providerInterviewId,
-      status: String(data.status || 'UNKNOWN'),
-      score: data.score === undefined ? undefined : Number(data.score),
-      summary: data.summary ? String(data.summary) : undefined,
-      transcriptUrl: data.transcriptUrl ? String(data.transcriptUrl) : undefined,
-      recordingUrl: data.recordingUrl ? String(data.recordingUrl) : undefined,
-      dimensions: Array.isArray(data.dimensions) ? data.dimensions as ProviderResult['dimensions'] : undefined,
-      raw: payload,
+      status: normalizeStatus(statusValue),
+      connectionStatus: optionalString(link.connection_status),
+      qaRecords,
+      recordingUrl: qaRecords.find((record) => record.recordingUrl)?.recordingUrl,
     };
   }
 }
-
-export function verifyProviderWebhook(rawBody: Buffer, signature?: string, timestamp?: string) {
-  const secret = process.env.INTERVIEW_PROVIDER_WEBHOOK_SECRET;
-  if (!secret || !signature || !timestamp) return false;
-  if (Math.abs(Date.now() - Number(timestamp) * 1000) > 5 * 60 * 1000) return false;
-  const expected = Buffer.from(createHmac('sha256', secret).update(`${timestamp}.${rawBody.toString('utf8')}`).digest('hex'));
-  const actual = Buffer.from(signature.replace(/^sha256=/, ''));
-  return expected.length === actual.length && timingSafeEqual(expected, actual);
-}
-

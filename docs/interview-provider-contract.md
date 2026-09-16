@@ -1,162 +1,113 @@
-# AI 面试 Provider 接口契约
+# 面试执行引擎对接契约
 
-智面 ATS 通过服务端调用外部 AI 面试平台。所有时间使用 ISO 8601，所有接口使用 HTTPS。
+智面 ATS 作为管理端，通过 API Key 调用独立面试执行引擎。引擎只负责面试流程、TTS、录像上传和 ASR 转录，不承载项目、岗位、候选人等 ATS 业务数据。
 
-## 环境变量
+## ATS 环境变量
 
 ```text
-INTERVIEW_PROVIDER_BASE_URL
-INTERVIEW_PROVIDER_API_KEY
-INTERVIEW_PROVIDER_CREATE_PATH=/interviews
-INTERVIEW_PROVIDER_WEBHOOK_SECRET
-PUBLIC_API_BASE_URL
+INTERVIEW_PROVIDER_BASE_URL=https://interview.example.com
+INTERVIEW_PROVIDER_API_KEY=<ADMIN_API_KEY>
+INTERVIEW_PROVIDER_ADMIN_PATH=/api/admin/interview-links
+INTERVIEW_PROVIDER_TIMEOUT_MS=15000
+INTERVIEW_PROVIDER_DEFAULT_DIFFICULTY=medium
+INTERVIEW_PROVIDER_AUTO_NEXT=true
+INTERVIEW_PROVIDER_NEXT_BREAK_SECONDS=30
+INTERVIEW_PROVIDER_TTS_VOICE=zh_female_xiaohe_uranus_bigtts
+INTERVIEW_PROVIDER_MAX_DURATION_SECONDS=1800
+INTERVIEW_PROVIDER_TIMEOUT_SECONDS=60
+INTERVIEW_PROVIDER_INTERVIEWER_NAME=AI·嘉欣
 ```
 
-## 创建面试
+API Key 仅保存在 ATS 服务端。请求使用：
 
 ```http
-POST {BASE_URL}/interviews
-Authorization: Bearer {API_KEY}
-Idempotency-Key: ZM-IV-...
-Content-Type: application/json
+X-API-Key: <ADMIN_API_KEY>
 ```
 
-请求：
+## 创建面试链接
+
+```http
+POST {BASE_URL}/api/admin/interview-links
+Content-Type: application/json
+X-API-Key: <ADMIN_API_KEY>
+```
+
+ATS 会从候选人和岗位记录映射为：
 
 ```json
 {
-  "requestId": "ZM-IV-20260916-0001",
-  "candidate": {
-    "id": "candidate-id",
-    "name": "候选人",
-    "mobile": "13800000000",
-    "email": "candidate@example.com"
+  "candidate_name": "张三",
+  "candidate_email": "zhangsan@example.com",
+  "resume_text": "3年后端开发经验",
+  "jd_title": "后端工程师",
+  "jd_text": "负责后端服务设计与开发",
+  "focus_areas": ["后端开发", "数据库"],
+  "default_difficulty": "medium",
+  "auto_next": true,
+  "next_break_seconds": 30,
+  "tts_voice": "zh_female_xiaohe_uranus_bigtts",
+  "expires_in_days": 7,
+  "max_interview_duration": 1800,
+  "interview_timeout": 60,
+  "interviewer_name": "AI·嘉欣"
+}
+```
+
+`jd_text` 必填。岗位没有 `jdText` 时，ATS 返回 `400`，不会创建空内容面试。
+
+响应：
+
+```json
+{
+  "item": {
+    "id": "link-id",
+    "token": "candidate-token",
+    "status": "pending"
   },
-  "project": "项目名称",
-  "job": "岗位名称",
-  "questionBankId": "question-bank-id",
-  "scoreTemplateId": "score-template-id",
-  "expiresAt": "2026-09-18T10:00:00+08:00",
-  "callbackUrl": "https://ats.example.com/api/webhooks/interview-provider",
-  "metadata": {
-    "atsInterviewCode": "ZM-IV-20260916-0001",
-    "operatorId": "user-id"
-  }
+  "interviewUrl": "/interview/candidate-token"
 }
 ```
 
-响应至少包含：
+相对 `interviewUrl` 会自动转换为基于 `INTERVIEW_PROVIDER_BASE_URL` 的绝对地址。
+
+## 同步面试结果
+
+```http
+GET {BASE_URL}/api/admin/interview-links/{id}
+X-API-Key: <ADMIN_API_KEY>
+```
+
+响应：
 
 ```json
 {
-  "data": {
-    "providerInterviewId": "provider-id",
-    "interviewUrl": "https://interview.example.com/xxx",
-    "accessToken": "optional-token",
-    "expiresAt": "2026-09-18T10:00:00+08:00",
-    "status": "PENDING"
-  }
+  "link": {
+    "id": "link-id",
+    "status": "completed",
+    "connection_status": "offline"
+  },
+  "qaRecords": [
+    {
+      "id": "qa-id",
+      "question": "请自我介绍",
+      "candidate_answer": "转录文字",
+      "recording_url": "https://media.example.com/qa.webm",
+      "recording_status": "ready"
+    }
+  ]
 }
 ```
 
-兼容字段：`interviewId/id`、`url/link`、`expireTime/expiredAt`。
+ATS 只保存标准化后的执行状态、连接状态、逐题转录和录像地址，不保存引擎原始响应。
 
-## 重新生成链接
+## 重发和作废
 
-```http
-POST {BASE_URL}/interviews/{providerInterviewId}/link/regenerate
-```
+执行引擎没有独立的“重新生成”接口。ATS 重发时：
 
-```json
-{
-  "expiresAt": "2026-09-19T10:00:00+08:00"
-}
-```
+1. `POST /api/admin/interview-links` 使用当前候选人、简历和 JD 创建新链接。
+2. 新链接创建成功后，`DELETE /api/admin/interview-links/{oldId}` 作废旧链接。
+3. ATS 保留旧台账记录并标记为已废弃。
 
-响应格式与创建面试相同。ATS 会保留旧记录并将其标记为已失效。
+如果旧链接删除失败，ATS 会尝试删除刚创建的新链接并返回错误，避免静默产生两个有效入口。
 
-## 面试控制
-
-```http
-POST {BASE_URL}/interviews/{providerInterviewId}/{action}
-```
-
-`action` 支持：
-
-- `pause`
-- `resume`
-- `extend`，请求体 `{ "value": 10 }`
-- `finish`
-- `cancel`
-
-## 主动获取结果
-
-```http
-GET {BASE_URL}/interviews/{providerInterviewId}/result
-```
-
-```json
-{
-  "data": {
-    "status": "COMPLETED",
-    "score": 88,
-    "summary": "综合评价",
-    "transcriptUrl": "https://...",
-    "recordingUrl": "https://...",
-    "dimensions": [
-      {
-        "name": "沟通能力",
-        "score": 90,
-        "comment": "表达清晰"
-      }
-    ]
-  }
-}
-```
-
-## 结果 Webhook
-
-Provider 回调：
-
-```http
-POST https://ats.example.com/api/webhooks/interview-provider
-x-provider-timestamp: 1789524000
-x-provider-signature: sha256=<hex>
-Content-Type: application/json
-```
-
-签名算法：
-
-```text
-HMAC-SHA256(
-  INTERVIEW_PROVIDER_WEBHOOK_SECRET,
-  timestamp + "." + rawRequestBody
-)
-```
-
-请求体：
-
-```json
-{
-  "eventId": "unique-event-id",
-  "eventType": "INTERVIEW_COMPLETED",
-  "providerInterviewId": "provider-id",
-  "occurredAt": "2026-09-16T18:00:00+08:00",
-  "data": {
-    "status": "COMPLETED",
-    "score": 88,
-    "summary": "综合评价",
-    "transcriptUrl": "https://...",
-    "recordingUrl": "https://...",
-    "dimensions": []
-  }
-}
-```
-
-要求：
-
-- `eventId` 全局唯一，用于幂等。
-- 时间戳与服务器时间偏差不能超过 5 分钟。
-- Provider 对非 2xx 响应应指数退避重试。
-- URL 应为有权限控制或短期签名的 HTTPS 地址。
-
+执行引擎不提供暂停、延长或管理端远程结束能力，ATS 仅开放“同步结果”和“作废链接”操作。

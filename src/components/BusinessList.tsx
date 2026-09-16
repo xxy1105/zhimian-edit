@@ -218,6 +218,7 @@ export function BusinessList({
         <Form form={form} layout="vertical" preserve={false}>
           {editorFields.map((field)=><Form.Item key={field.name} name={field.name} label={field.label} rules={field.required?[{required:true,message:`请填写${field.label}`}]:undefined}>
             {field.type==='number'?<InputNumber min={0} style={{width:'100%'}} />:
+              field.type==='textarea'?<Input.TextArea rows={5} />:
               field.type==='project'?<Select showSearch options={projects.map(item=>({value:String(item.name),label:String(item.name)}))} />:
               field.type==='job'?<Select showSearch options={jobs.map(item=>({value:String(item.name),label:String(item.name)}))} />:
               field.type==='status'?<Select options={['草稿','进行中','招聘中','待审批','启用','停用','已完成','已归档'].map(value=>({value,label:value}))} />:
@@ -232,7 +233,7 @@ export function BusinessList({
 type EditorField = {
   name:string;
   label:string;
-  type?:'number'|'project'|'job'|'status';
+  type?:'number'|'project'|'job'|'status'|'textarea';
   required?:boolean;
 };
 
@@ -252,6 +253,7 @@ function getEditorFields(collection:CollectionName):EditorField[] {
       {name:'name',label:'岗位名称',required:true},{name:'project',label:'所属项目',type:'project',required:true},
       {name:'owner',label:'岗位负责人',required:true},{name:'recruiter',label:'招聘专员'},
       {name:'hc',label:'HC',type:'number'},{name:'city',label:'工作地点'},
+      {name:'jdText',label:'JD 正文',type:'textarea',required:true},
       {name:'status',label:'状态',type:'status',required:true},
     ],
     candidates:[

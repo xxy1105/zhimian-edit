@@ -20,7 +20,6 @@ export type Database = {
     version: number;
     createdAt: string;
     updatedAt: string;
-    processedEventIds?: string[];
   };
 };
 

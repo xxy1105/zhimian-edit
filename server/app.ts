@@ -1,12 +1,13 @@
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import { randomUUID } from 'node:crypto';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import multer from 'multer';
 import {
   authenticate, clearSessionCookie, developmentUsers, setSessionCookie, validateAuthConfiguration,
   verifyPassword, type AuthUser,
 } from './auth.ts';
-import { HttpInterviewProvider, verifyProviderWebhook, type InterviewProvider } from './interview-provider.ts';
+import { HttpInterviewProvider, type CreateInterviewInput, type InterviewProvider } from './interview-provider.ts';
 import { createLarkMeeting, getLarkMeetingResult, testLarkConnection } from './lark-service.ts';
 import { parseResume, sendInterviewNotification, testNotificationProvider } from './external-services.ts';
 import { Store } from './store.ts';
@@ -103,6 +104,57 @@ function canUseScope(
   return true;
 }
 
+function recordText(record: Entity, ...fields: string[]) {
+  for (const field of fields) {
+    const value = record[field];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function resumeText(candidate: Entity) {
+  const direct = recordText(candidate, 'resumeText', 'resume_text');
+  if (direct) return direct;
+  const parsed = candidate.resumeData;
+  if (!parsed || typeof parsed !== 'object') return undefined;
+  const data = parsed as Record<string, unknown>;
+  return ['resumeText', 'resume_text', 'text', 'content', 'rawText']
+    .map((field) => data[field])
+    .find((value): value is string => typeof value === 'string' && Boolean(value.trim()));
+}
+
+function providerCreateInput(
+  requestId: string,
+  candidate: Entity,
+  job: Entity,
+  project: string,
+  expiresAt: string,
+): CreateInterviewInput {
+  const jdText = recordText(job, 'jdText', 'jd_text', 'description', 'responsibilities');
+  if (!jdText) {
+    throw Object.assign(new Error('目标岗位缺少 JD 正文，请先在岗位中维护 jdText'), { status: 400 });
+  }
+  return {
+    requestId,
+    candidate: {
+      id: candidate.key,
+      name: String(candidate.name),
+      email: recordText(candidate, 'email'),
+      resumeText: resumeText(candidate),
+    },
+    project,
+    job: String(job.name),
+    jdText,
+    focusAreas: Array.isArray(job.focusAreas) ? job.focusAreas.map(String) : undefined,
+    defaultDifficulty: recordText(job, 'defaultDifficulty', 'default_difficulty'),
+    firstQuestion: recordText(job, 'firstQuestion', 'first_question'),
+    firstQuestionKeywords: recordText(job, 'firstQuestionKeywords', 'first_question_keywords'),
+    lastQuestion: recordText(job, 'lastQuestion', 'last_question'),
+    lastQuestionKeywords: recordText(job, 'lastQuestionKeywords', 'last_question_keywords'),
+    expiresAt,
+  };
+}
+
 function csvValue(value: unknown) {
   const text = Array.isArray(value) ? value.join('、') : String(value ?? '');
   return `"${text.replaceAll('"', '""')}"`;
@@ -110,7 +162,7 @@ function csvValue(value: unknown) {
 
 function makeCode(prefix: string) {
   const date = new Date().toISOString().slice(0, 10).replaceAll('-', '');
-  return `${prefix}-${date}-${String(Date.now()).slice(-4)}`;
+  return `${prefix}-${date}-${randomUUID().slice(0, 8).toUpperCase()}`;
 }
 
 export function createApp(store = new Store(), services?:{
@@ -135,12 +187,7 @@ export function createApp(store = new Store(), services?:{
     },
   }));
   app.use(cookieParser());
-  app.use(express.json({
-    limit: '2mb',
-    verify: (request, _response, buffer) => {
-      (request as Request & { rawBody?: Buffer }).rawBody = buffer;
-    },
-  }));
+  app.use(express.json({ limit: '2mb' }));
 
   app.get('/api/health', async (_request, response) => {
     const database = await store.read();
@@ -168,48 +215,6 @@ export function createApp(store = new Store(), services?:{
   app.post('/api/auth/logout', (_request, response) => {
     clearSessionCookie(response);
     response.status(204).send();
-  });
-
-  app.post('/api/webhooks/interview-provider', async (request, response) => {
-    const rawBody = (request as Request & { rawBody?: Buffer }).rawBody || Buffer.from(JSON.stringify(request.body));
-    if (!verifyProviderWebhook(rawBody, request.header('x-provider-signature'), request.header('x-provider-timestamp'))) {
-      response.status(401).json({ message: 'Webhook 签名无效' });
-      return;
-    }
-    const eventId = String(request.body.eventId || request.body.event_id || '');
-    const providerInterviewId = String(request.body.providerInterviewId || request.body.interviewId || request.body.data?.providerInterviewId || '');
-    if (!eventId || !providerInterviewId) {
-      response.status(400).json({ message: 'Webhook 缺少 eventId 或 providerInterviewId' });
-      return;
-    }
-    const database = await store.read();
-    if (database.metadata.processedEventIds?.includes(eventId)) {
-      response.json({ data: { accepted: true, duplicate: true } });
-      return;
-    }
-    const interview = database.interviews.find((item) => item.providerInterviewId === providerInterviewId);
-    if (!interview) {
-      response.status(404).json({ message: '未找到对应面试记录' });
-      return;
-    }
-    const result = request.body.data || request.body;
-    await store.update((current) => {
-      const target = current.interviews.find((item) => item.key === interview.key);
-      if (target) {
-        Object.assign(target, {
-          providerStatus: result.status,
-          status: result.status === 'COMPLETED' ? '待审核' : target.status,
-          score: result.score ?? target.score,
-          resultSummary: result.summary ?? target.resultSummary,
-          transcriptUrl: result.transcriptUrl ?? target.transcriptUrl,
-          recordingUrl: result.recordingUrl ?? target.recordingUrl,
-          dimensions: result.dimensions ?? target.dimensions,
-          updated: new Date().toISOString(),
-        });
-      }
-      current.metadata.processedEventIds = [...(current.metadata.processedEventIds || []).slice(-999), eventId];
-    });
-    response.json({ data: { accepted: true } });
   });
 
   app.use('/api', authenticate);
@@ -338,15 +343,11 @@ export function createApp(store = new Store(), services?:{
   });
 
   app.post('/api/interviews/invite', requireWritable, async (request, response) => {
-    const {
-      candidateKeys, project, job, expiresInHours = 48, questionBankId, scoreTemplateId,
-    } = request.body as {
+    const { candidateKeys, project, job, expiresInHours = 48 } = request.body as {
       candidateKeys?: string[];
       project?: string;
       job?: string;
       expiresInHours?: number;
-      questionBankId?: string;
-      scoreTemplateId?: string;
     };
     if (!candidateKeys?.length || !project || !job) {
       response.status(400).json({ message: '候选人、项目和岗位不能为空' });
@@ -359,27 +360,18 @@ export function createApp(store = new Store(), services?:{
       response.status(403).json({ message: '候选人、项目或岗位不在当前账号的数据范围内' });
       return;
     }
+    const selectedJob = database.jobs.find((item) => item.name === job && item.project === project);
+    if (!selectedJob) {
+      response.status(400).json({ message: '未找到目标岗位' });
+      return;
+    }
     const expiresAt = new Date(Date.now() + expiresInHours * 3600000).toISOString();
-    const callbackUrl = `${process.env.PUBLIC_API_BASE_URL || 'http://127.0.0.1:3001'}/api/webhooks/interview-provider`;
     const created = [];
     for (const candidate of selected) {
       const code = makeCode('ZM-IV');
-      const provider = await interviewProvider.create({
-        requestId: code,
-        candidate: {
-          id: candidate.key,
-          name: String(candidate.name),
-          mobile: candidate.contact ? String(candidate.contact) : undefined,
-          email: candidate.email ? String(candidate.email) : undefined,
-        },
-        project,
-        job,
-        questionBankId,
-        scoreTemplateId,
-        expiresAt,
-        callbackUrl,
-        metadata: { atsInterviewCode: code, operatorId: request.user!.id },
-      });
+      const provider = await interviewProvider.create(
+        providerCreateInput(code, candidate, selectedJob, project, expiresAt),
+      );
       const record = await store.create('interviews', {
         code,
         candidate: candidate.name,
@@ -431,12 +423,23 @@ export function createApp(store = new Store(), services?:{
       return;
     }
     const expiresAt = new Date(Date.now() + Number(request.body.expiresInHours || 48) * 3600000).toISOString();
-    const provider = await interviewProvider.regenerate(String(current.providerInterviewId), expiresAt);
+    const database = await store.read();
+    const candidate = database.candidates.find((item) => item.key === current.candidateKey);
+    const job = database.jobs.find((item) => item.name === current.job && item.project === current.project);
+    if (!candidate || !job) {
+      response.status(409).json({ message: '原候选人或岗位数据不存在，无法重新生成链接' });
+      return;
+    }
+    const code = makeCode('ZM-IV');
+    const provider = await interviewProvider.regenerate(
+      String(current.providerInterviewId),
+      providerCreateInput(code, candidate, job, String(current.project), expiresAt),
+    );
     await store.patch('interviews', current.key, { linkStatus: '已失效', status: '已废弃' });
     const created = await store.create('interviews', {
       ...current,
       key: undefined,
-      code: makeCode('ZM-IV'),
+      code,
       previousInterviewKey: current.key,
       providerInterviewId: provider.providerInterviewId,
       interviewUrl: provider.interviewUrl,
@@ -456,14 +459,15 @@ export function createApp(store = new Store(), services?:{
       return;
     }
     const action = String(request.body.action || '');
-    if (!['pause', 'resume', 'extend', 'finish', 'cancel'].includes(action)) {
-      response.status(400).json({ message: '不支持的面试控制动作' });
+    if (action !== 'cancel') {
+      response.status(409).json({ message: '当前面试引擎仅支持作废链接，不支持暂停、延长或远程结束' });
       return;
     }
-    await interviewProvider.control(String(current.providerInterviewId), action, request.body.value);
+    await interviewProvider.cancel(String(current.providerInterviewId));
     const updated = await store.patch('interviews', current.key, {
-      providerStatus: action.toUpperCase(),
-      status: action === 'finish' ? '待审核' : action === 'cancel' ? '已废弃' : current.status,
+      providerStatus: 'CANCELLED',
+      linkStatus: '已失效',
+      status: '已废弃',
     });
     response.json({ data: updated });
   });
@@ -477,12 +481,14 @@ export function createApp(store = new Store(), services?:{
     const result = await interviewProvider.getResult(String(current.providerInterviewId));
     const updated = await store.patch('interviews', current.key, {
       providerStatus: result.status,
+      connectionStatus: result.connectionStatus,
       status: result.status === 'COMPLETED' ? '待审核' : current.status,
-      score: result.score ?? current.score,
-      resultSummary: result.summary,
-      transcriptUrl: result.transcriptUrl,
+      linkStatus: result.status === 'COMPLETED' ? '已完成' : current.linkStatus,
+      online: result.connectionStatus
+        ? result.connectionStatus.toLowerCase() === 'online' ? '在线' : '离线'
+        : current.online,
       recordingUrl: result.recordingUrl,
-      dimensions: result.dimensions,
+      qaRecords: result.qaRecords,
     });
     response.json({ data: updated });
   });
@@ -661,8 +667,9 @@ export function createApp(store = new Store(), services?:{
   });
 
   app.use((error: Error & { status?: number }, _request: Request, response: Response, _next: NextFunction) => {
-    console.error(error);
-    response.status(error.status || 500).json({ message: error.message || '服务器内部错误' });
+    const status = error.status || 500;
+    if (status >= 500 && status !== 503) console.error(error);
+    response.status(status).json({ message: error.message || '服务器内部错误' });
   });
 
   return app;

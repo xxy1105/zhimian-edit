@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { createHmac } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,18 +17,23 @@ const provider:InterviewProvider={
   async create(input){
     return {providerInterviewId:`provider-${input.requestId}`,interviewUrl:`https://interview.example.test/${input.requestId}`,expiresAt:input.expiresAt,status:'PENDING'};
   },
-  async regenerate(providerInterviewId,expiresAt){
-    return {providerInterviewId:`${providerInterviewId}-new`,interviewUrl:`https://interview.example.test/${providerInterviewId}-new`,expiresAt,status:'PENDING'};
+  async regenerate(providerInterviewId,input){
+    return {providerInterviewId:`${providerInterviewId}-new`,interviewUrl:`https://interview.example.test/${providerInterviewId}-new`,expiresAt:input.expiresAt,status:'PENDING'};
   },
-  async control(){},
+  async cancel(){},
   async getResult(providerInterviewId){
-    return {providerInterviewId,status:'COMPLETED',score:88,summary:'真实 Provider 测试结果'};
+    return {
+      providerInterviewId,
+      status:'COMPLETED',
+      connectionStatus:'offline',
+      qaRecords:[{id:'qa-1',question:'请自我介绍',candidateAnswer:'真实转录',recordingUrl:'https://recording.test/qa-1'}],
+      recordingUrl:'https://recording.test/qa-1',
+    };
   },
 };
 
 before(async()=>{
   process.env.SESSION_SECRET='test-session-secret';
-  process.env.INTERVIEW_PROVIDER_WEBHOOK_SECRET='test-webhook-secret';
   directory=await mkdtemp(path.join(os.tmpdir(),'zhimian-ats-'));
   const store=new Store(path.join(directory,'db.json'));
   await store.reset();
@@ -45,7 +49,6 @@ before(async()=>{
 
 after(async()=>{
   delete process.env.SESSION_SECRET;
-  delete process.env.INTERVIEW_PROVIDER_WEBHOOK_SECRET;
   await rm(directory,{recursive:true,force:true});
 });
 
@@ -112,6 +115,18 @@ describe('ATS API security and integrations',()=>{
     }).expect(403);
   });
 
+  it('rejects interview creation when the selected job has no JD text',async()=>{
+    const job=await admin.post('/api/jobs').send({
+      name:'缺少 JD 的岗位',project:'2026 秋季技术支持专项',status:'招聘中',
+    }).expect(201);
+    const candidate=await admin.post('/api/candidates').send({
+      name:'待测试候选人',project:'2026 秋季技术支持专项',job:job.body.data.name,status:'可邀约',
+    }).expect(201);
+    await admin.post('/api/interviews/invite').send({
+      candidateKeys:[candidate.body.data.key],project:'2026 秋季技术支持专项',job:job.body.data.name,
+    }).expect(400);
+  });
+
   it('creates a real provider link, preserves the old link on regenerate, and syncs results',async()=>{
     const invitation=await admin.post('/api/interviews/invite').send({
       candidateKeys:['1'],project:'2026 秋季技术支持专项',job:'云产品技术支持工程师',
@@ -120,21 +135,10 @@ describe('ATS API security and integrations',()=>{
     const regenerated=await admin.post(`/api/interviews/${invitation.body.data[0].key}/reissue`).send({expiresInHours:24}).expect(201);
     assert.notEqual(regenerated.body.data.key,invitation.body.data[0].key);
     const result=await admin.post(`/api/interviews/${regenerated.body.data.key}/sync-result`).expect(200);
-    assert.equal(result.body.data.score,88);
-  });
-
-  it('accepts signed provider webhooks once and rejects invalid signatures',async()=>{
-    const invitation=await admin.post('/api/interviews/invite').send({
-      candidateKeys:['2'],project:'2026 秋季技术支持专项',job:'云产品技术支持工程师',
-    }).expect(201);
-    const body={eventId:'event-1',providerInterviewId:invitation.body.data[0].providerInterviewId,data:{status:'COMPLETED',score:91,summary:'Webhook 结果'}};
-    const raw=JSON.stringify(body);
-    const timestamp=String(Math.floor(Date.now()/1000));
-    const signature=createHmac('sha256','test-webhook-secret').update(`${timestamp}.${raw}`).digest('hex');
-    await request(app).post('/api/webhooks/interview-provider').set('x-provider-timestamp',timestamp).set('x-provider-signature',signature).set('Content-Type','application/json').send(raw).expect(200);
-    const duplicate=await request(app).post('/api/webhooks/interview-provider').set('x-provider-timestamp',timestamp).set('x-provider-signature',signature).set('Content-Type','application/json').send(raw).expect(200);
-    assert.equal(duplicate.body.data.duplicate,true);
-    await request(app).post('/api/webhooks/interview-provider').set('x-provider-timestamp',timestamp).set('x-provider-signature','bad').send(body).expect(401);
+    assert.equal(result.body.data.qaRecords[0].candidateAnswer,'真实转录');
+    assert.equal(result.body.data.recordingUrl,'https://recording.test/qa-1');
+    const cancelled=await admin.post(`/api/interviews/${regenerated.body.data.key}/control`).send({action:'cancel'}).expect(200);
+    assert.equal(cancelled.body.data.linkStatus,'已失效');
   });
 
   it('creates and synchronizes a Lark meeting through injected official-service adapters',async()=>{

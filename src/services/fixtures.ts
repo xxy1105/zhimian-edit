@@ -21,6 +21,17 @@ export const projects: Project[] = [
   { key:'8', code:'ZM-PJ-2026-008', name:'企业服务交付升级计划', client:'企业服务事业群', manager:'林嘉树', jobs:5, target:50, passed:44, progress:88, period:'01/15 - 07/31', status:'已归档', risk:'正常', updated:'08-28 09:45' },
 ];
 
+const jobDescriptions = [
+  '负责云产品客户技术支持、问题定位、故障协同与知识沉淀，要求具备服务端和网络基础。',
+  '负责客户服务团队管理、服务质量改进、复杂客诉处理与人员培养。',
+  '负责售后问题受理、进度跟踪、客户沟通和服务记录维护。',
+  '负责行业解决方案咨询、需求分析、方案设计和项目支持。',
+  '负责交付计划维护、资源协调、风险跟踪和跨团队沟通。',
+  '负责客户成功策略、续约运营、使用分析和价值提升。',
+  '负责服务质量数据分析、问题归因、指标监控和改进建议。',
+  '负责海外中文客户咨询、问题处理和跨时区服务协作。',
+];
+
 export const jobs = [
   { key:'1', code:'ZM-JD-2026-018', name:'云产品技术支持工程师', project:projects[1].name, owner:'顾清禾、陈砚', recruiter:'许昭', hc:18, passed:9, gap:9, city:'北京', priority:'紧急', status:'招聘中', version:'V3.2', updated:'09-03 16:10' },
   { key:'2', code:'ZM-JD-2026-019', name:'客户服务组长', project:projects[0].name, owner:'周谨言', recruiter:'唐宁、苏晚', hc:8, passed:6, gap:2, city:'西安', priority:'高', status:'招聘中', version:'V2.1', updated:'09-03 15:44' },
@@ -30,7 +41,7 @@ export const jobs = [
   { key:'6', code:'ZM-JD-2026-023', name:'客户成功运营经理', project:projects[2].name, owner:'林嘉树、陈砚', recruiter:'温言', hc:6, passed:5, gap:1, city:'南京', priority:'高', status:'暂停招聘', version:'V2.3', updated:'09-02 13:11' },
   { key:'7', code:'ZM-JD-2026-024', name:'服务质量分析师', project:projects[4].name, owner:'梁序', recruiter:'唐宁', hc:8, passed:7, gap:1, city:'成都', priority:'普通', status:'已关闭', version:'V1.6', updated:'09-01 16:08' },
   { key:'8', code:'ZM-JD-2026-025', name:'海外中文服务顾问', project:projects[6].name, owner:'韩若川', recruiter:'叶舟', hc:14, passed:2, gap:12, city:'深圳', priority:'普通', status:'草稿', version:'V0.3', updated:'09-01 09:22' },
-];
+].map((job,index)=>({...job,jdText:jobDescriptions[index]}));
 
 export const interviews: Interview[] = [
   { key:'1', code:'ZM-IV-20260903-0086', candidate:'江予安', project:projects[1].name, job:jobs[0].name, round:'首轮 AI 面试', owner:'许昭', linkStatus:'进行中', status:'面试中', online:'在线', remaining:'08:42', score:72, risk:'网络波动', updated:'16:48' },
