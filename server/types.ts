@@ -20,6 +20,7 @@ export type Database = {
     version: number;
     createdAt: string;
     updatedAt: string;
+    processedEventIds?: string[];
   };
 };
 
@@ -41,4 +42,3 @@ export const collectionNames = [
 ] as const satisfies readonly (keyof Database)[];
 
 export type CollectionName = (typeof collectionNames)[number];
-

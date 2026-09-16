@@ -155,7 +155,7 @@ export function BusinessList({
             message.success('副本已创建');
             return;
           }
-          message.info('操作日志已记录');
+          navigate('/settings/audit');
         }}}>
           <Button type="link" size="small">更多</Button>
         </Dropdown>

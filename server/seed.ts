@@ -1,4 +1,4 @@
-import { candidates as candidateNames, interviews, jobs, projects } from '../src/services/mock.ts';
+import { candidates as candidateNames, interviews, jobs, projects } from '../src/services/fixtures.ts';
 import type { Database, Entity } from './types.ts';
 
 const now = '2026-09-14T09:00:00.000Z';
@@ -147,11 +147,7 @@ export function createSeedDatabase(): Database {
     templates,
     auditLogs,
     settings: {
-      feishuEnabled: true,
-      feishuAppId: 'cli_demo_zhimian',
-      callbackUrl: 'http://localhost:3001/api/webhooks/feishu/events',
-      smtpHost: 'smtp.example.com',
-      smsProvider: '火山引擎短信',
+      callbackUrl: 'http://127.0.0.1:3001/api/webhooks/interview-provider',
       ssoEnabled: true,
       sessionHours: 8,
       dataRetentionDays: 365,
@@ -160,4 +156,3 @@ export function createSeedDatabase(): Database {
     metadata: { version: 1, createdAt: now, updatedAt: now },
   };
 }
-

@@ -3,6 +3,9 @@ dist
 .tools
 .cache
 server/data/db.json
+.env
+.env.*
+!.env.example
 .DS_Store
 *.log
 *.tsbuildinfo

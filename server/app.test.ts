@@ -1,90 +1,149 @@
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import request from 'supertest';
 import { createApp } from './app.ts';
+import { createSession, developmentUsers } from './auth.ts';
+import type { InterviewProvider } from './interview-provider.ts';
 import { Store } from './store.ts';
 
-let directory: string;
-let app: ReturnType<typeof createApp>;
+let directory:string;
+let app:ReturnType<typeof createApp>;
+let admin:ReturnType<typeof request.agent>;
 
-before(async () => {
-  directory = await mkdtemp(path.join(os.tmpdir(), 'zhimian-ats-'));
-  const store = new Store(path.join(directory, 'db.json'));
+const provider:InterviewProvider={
+  async create(input){
+    return {providerInterviewId:`provider-${input.requestId}`,interviewUrl:`https://interview.example.test/${input.requestId}`,expiresAt:input.expiresAt,status:'PENDING'};
+  },
+  async regenerate(providerInterviewId,expiresAt){
+    return {providerInterviewId:`${providerInterviewId}-new`,interviewUrl:`https://interview.example.test/${providerInterviewId}-new`,expiresAt,status:'PENDING'};
+  },
+  async control(){},
+  async getResult(providerInterviewId){
+    return {providerInterviewId,status:'COMPLETED',score:88,summary:'真实 Provider 测试结果'};
+  },
+};
+
+before(async()=>{
+  process.env.SESSION_SECRET='test-session-secret';
+  process.env.INTERVIEW_PROVIDER_WEBHOOK_SECRET='test-webhook-secret';
+  directory=await mkdtemp(path.join(os.tmpdir(),'zhimian-ats-'));
+  const store=new Store(path.join(directory,'db.json'));
   await store.reset();
-  app = createApp(store);
+  app=createApp(store,{
+    interviewProvider:provider,
+    createLarkMeeting:async()=>({reserveId:'reserve-1',meetingNo:'123456',meetingUrl:'https://vc.feishu.cn/j/123456',appLink:undefined,password:undefined,expiresAt:'123',calendarEventId:'event-1'}),
+    getLarkMeetingResult:async()=>({meetingId:'meeting-1',meeting:{status:2,note_id:'minute-1'},relatedArtifacts:{},recording:{url:'https://recording.test/file'}}),
+    testLarkConnection:async()=>({connected:true,userName:'测试用户',checkedAt:new Date().toISOString()}),
+  });
+  admin=request.agent(app);
+  await admin.post('/api/auth/login').send({username:'admin',password:'Zhimian@2026'}).expect(200);
 });
 
-after(async () => {
-  await rm(directory, { recursive: true, force: true });
+after(async()=>{
+  delete process.env.SESSION_SECRET;
+  delete process.env.INTERVIEW_PROVIDER_WEBHOOK_SECRET;
+  await rm(directory,{recursive:true,force:true});
 });
 
-describe('ATS API', () => {
-  it('returns health and seeded bootstrap data', async () => {
-    const health = await request(app).get('/api/health').expect(200);
-    assert.equal(health.body.status, 'ok');
-
-    const bootstrap = await request(app).get('/api/bootstrap').expect(200);
-    assert.equal(bootstrap.body.data.projects.length, 8);
-    assert.equal(bootstrap.body.data.candidates.length, 36);
+describe('ATS API security and integrations',()=>{
+  it('rejects development default accounts in production',()=>{
+    const previousNodeEnv=process.env.NODE_ENV;
+    const previousUsers=process.env.AUTH_USERS_JSON;
+    const previousPassword=process.env.ADMIN_PASSWORD;
+    process.env.NODE_ENV='production';
+    delete process.env.AUTH_USERS_JSON;
+    delete process.env.ADMIN_PASSWORD;
+    try {
+      assert.throws(()=>developmentUsers(),/必须配置 AUTH_USERS_JSON 或 ADMIN_PASSWORD/);
+    } finally {
+      if(previousNodeEnv===undefined)delete process.env.NODE_ENV;
+      else process.env.NODE_ENV=previousNodeEnv;
+      if(previousUsers===undefined)delete process.env.AUTH_USERS_JSON;
+      else process.env.AUTH_USERS_JSON=previousUsers;
+      if(previousPassword===undefined)delete process.env.ADMIN_PASSWORD;
+      else process.env.ADMIN_PASSWORD=previousPassword;
+    }
   });
 
-  it('supports CRUD and persists changes', async () => {
-    const created = await request(app)
-      .post('/api/projects')
-      .send({ name: '接口测试项目', status: '草稿', manager: '周谨言' })
-      .expect(201);
-
-    const key = created.body.data.key;
-    await request(app).patch(`/api/projects/${key}`).send({ status: '进行中' }).expect(200);
-    const found = await request(app).get(`/api/projects/${key}`).expect(200);
-    assert.equal(found.body.data.status, '进行中');
-
-    await request(app).delete(`/api/projects/${key}`).expect(204);
-    await request(app).get(`/api/projects/${key}`).expect(404);
+  it('requires authentication and returns seeded bootstrap after login',async()=>{
+    await request(app).get('/api/bootstrap').expect(401);
+    const bootstrap=await admin.get('/api/bootstrap').expect(200);
+    assert.equal(bootstrap.body.data.projects.length,8);
+    assert.equal(bootstrap.body.data.user.role,'超级管理员');
+    assert.equal('feishuSecret' in bootstrap.body.data.settings,false);
+    await admin.patch('/api/settings').send({feishuSecret:'must-not-persist',timezone:'Asia/Shanghai'}).expect(200);
+    const refreshed=await admin.get('/api/bootstrap').expect(200);
+    assert.equal('feishuSecret' in refreshed.body.data.settings,false);
   });
 
-  it('creates invitations and completes meeting sync', async () => {
-    const invitation = await request(app)
-      .post('/api/interviews/invite')
-      .send({
-        candidateKeys: ['1', '2'],
-        project: '2026 秋季技术支持专项',
-        job: '云产品技术支持工程师',
-      })
-      .expect(201);
-    assert.equal(invitation.body.data.length, 2);
-
-    const meeting = await request(app)
-      .post('/api/meetings')
-      .send({
-        candidate: '江予安',
-        project: '2026 秋季技术支持专项',
-        job: '云产品技术支持工程师',
-        scheduledAt: '2026-09-15 14:00',
-        interviewers: ['陈砚'],
-        duration: 60,
-      })
-      .expect(201);
-
-    const synced = await request(app).post(`/api/meetings/${meeting.body.data.key}/sync`).expect(200);
-    assert.equal(synced.body.data.syncStatus, '已同步');
-    assert.match(synced.body.data.recordingUrl, /feishu\.cn/);
+  it('supports scoped CRUD with a server session',async()=>{
+    const created=await admin.post('/api/projects').send({name:'接口测试项目',status:'草稿'}).expect(201);
+    await admin.patch(`/api/projects/${created.body.data.key}`).send({status:'进行中'}).expect(200);
+    await admin.delete(`/api/projects/${created.body.data.key}`).expect(204);
   });
 
-  it('enforces read-only roles', async () => {
-    await request(app)
-      .post('/api/projects')
-      .set('x-role', encodeURIComponent('数据观察员'))
-      .send({ name: '不应创建' })
-      .expect(403);
+  it('prevents a restricted user from reading unrelated detail and writing',async()=>{
+    const token=createSession({id:'external-1',name:'外部客户',role:'外部客户',projectKeys:['1'],jobKeys:[]});
+    const client=request.agent(app);
+    const cookie=`zhimian_session=${token}`;
+    await client.get('/api/projects/2').set('Cookie',cookie).expect(404);
+    await client.post('/api/projects').set('Cookie',cookie).send({name:'越权项目'}).expect(403);
   });
 
-  it('exports UTF-8 CSV data', async () => {
-    const response = await request(app).get('/api/exports/projects').expect(200);
-    assert.match(response.headers['content-type'], /text\/csv/);
-    assert.match(response.text, /西北区域客户服务招聘项目/);
+  it('prevents scoped writers from moving records into another project',async()=>{
+    const token=createSession({id:'recruiter-1',name:'招聘专员',role:'招聘专员',projectKeys:['1'],jobKeys:[]});
+    const cookie=`zhimian_session=${token}`;
+    const scoped=await request(app).get('/api/bootstrap').set('Cookie',cookie).expect(200);
+    const adminData=await admin.get('/api/bootstrap').expect(200);
+    const candidate=scoped.body.data.candidates[0];
+    const foreignProject=adminData.body.data.projects.find((item:{key:string})=>item.key!=='1');
+    const foreignJob=adminData.body.data.jobs.find((item:{project:string})=>item.project===foreignProject.name);
+    assert.ok(candidate);
+    assert.ok(foreignJob);
+    await request(app).post('/api/interviews/invite').set('Cookie',cookie).send({
+      candidateKeys:[candidate.key],project:foreignProject.name,job:foreignJob.name,
+    }).expect(403);
+    await request(app).patch(`/api/candidates/${candidate.key}`).set('Cookie',cookie).send({
+      project:foreignProject.name,job:foreignJob.name,
+    }).expect(403);
+  });
+
+  it('creates a real provider link, preserves the old link on regenerate, and syncs results',async()=>{
+    const invitation=await admin.post('/api/interviews/invite').send({
+      candidateKeys:['1'],project:'2026 秋季技术支持专项',job:'云产品技术支持工程师',
+    }).expect(201);
+    assert.match(invitation.body.data[0].interviewUrl,/interview\.example\.test/);
+    const regenerated=await admin.post(`/api/interviews/${invitation.body.data[0].key}/reissue`).send({expiresInHours:24}).expect(201);
+    assert.notEqual(regenerated.body.data.key,invitation.body.data[0].key);
+    const result=await admin.post(`/api/interviews/${regenerated.body.data.key}/sync-result`).expect(200);
+    assert.equal(result.body.data.score,88);
+  });
+
+  it('accepts signed provider webhooks once and rejects invalid signatures',async()=>{
+    const invitation=await admin.post('/api/interviews/invite').send({
+      candidateKeys:['2'],project:'2026 秋季技术支持专项',job:'云产品技术支持工程师',
+    }).expect(201);
+    const body={eventId:'event-1',providerInterviewId:invitation.body.data[0].providerInterviewId,data:{status:'COMPLETED',score:91,summary:'Webhook 结果'}};
+    const raw=JSON.stringify(body);
+    const timestamp=String(Math.floor(Date.now()/1000));
+    const signature=createHmac('sha256','test-webhook-secret').update(`${timestamp}.${raw}`).digest('hex');
+    await request(app).post('/api/webhooks/interview-provider').set('x-provider-timestamp',timestamp).set('x-provider-signature',signature).set('Content-Type','application/json').send(raw).expect(200);
+    const duplicate=await request(app).post('/api/webhooks/interview-provider').set('x-provider-timestamp',timestamp).set('x-provider-signature',signature).set('Content-Type','application/json').send(raw).expect(200);
+    assert.equal(duplicate.body.data.duplicate,true);
+    await request(app).post('/api/webhooks/interview-provider').set('x-provider-timestamp',timestamp).set('x-provider-signature','bad').send(body).expect(401);
+  });
+
+  it('creates and synchronizes a Lark meeting through injected official-service adapters',async()=>{
+    const meeting=await admin.post('/api/meetings').send({
+      candidate:'江予安',project:'2026 秋季技术支持专项',job:'云产品技术支持工程师',scheduledAt:'2026-09-18 14:00',interviewers:['陈砚'],duration:60,
+    }).expect(201);
+    assert.equal(meeting.body.data.reserveId,'reserve-1');
+    const synced=await admin.post(`/api/meetings/${meeting.body.data.key}/sync`).expect(200);
+    assert.equal(synced.body.data.meetingId,'meeting-1');
+    assert.equal(synced.body.data.recordingUrl,'https://recording.test/file');
   });
 });

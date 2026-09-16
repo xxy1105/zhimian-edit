@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useLocation, useNavigate, Outlet } from 'react-router-dom';
 import {
   Avatar, Badge, Breadcrumb, Button, Divider, Dropdown, Input, Layout, Menu,
-  Modal, Result, Select, Space, Tooltip, Typography,
+  Modal, Result, Space, Tooltip, Typography,
 } from 'antd';
 import {
   BellOutlined, BulbOutlined, DownOutlined, HistoryOutlined, MenuFoldOutlined,
@@ -10,7 +10,7 @@ import {
   SettingOutlined, UserOutlined,
 } from '@ant-design/icons';
 import { navigation, pageMeta, type NavItem } from '../config/navigation';
-import { roles, useApp } from '../context/AppContext';
+import { useApp } from '../context/AppContext';
 import { useData } from '../context/DataContext';
 
 const { Sider, Header, Content } = Layout;
@@ -21,8 +21,8 @@ export function AppLayout() {
   const [query, setQuery] = useState('');
   const navigate = useNavigate();
   const location = useLocation();
-  const { role, setRole, dataScope } = useApp();
-  const { candidates, jobs, projects, metadata, error, refresh } = useData();
+  const { role, user, dataScope } = useApp();
+  const { candidates, jobs, projects, metadata, error, refresh, logout } = useData();
   const meta = pageMeta[location.pathname] || { title:'业务详情', description:'智面智能面试管理后台' };
   const restrictedPrefixes: Partial<Record<typeof role, string[]>> = {
     '数据观察员':['/dashboard','/records','/calendar','/analytics'],
@@ -77,9 +77,9 @@ export function AppLayout() {
             <Dropdown menu={{items:[{key:'/interviews/process',label:'面试进程'},{key:'/projects',label:'项目管理'},{key:'/analytics/overview',label:'招聘总览'}],onClick:({key})=>navigate(key)}}><Tooltip title="最近访问"><Button type="text" icon={<HistoryOutlined />} /></Tooltip></Dropdown>
             <Tooltip title="通知"><Badge dot offset={[-4,4]}><Button type="text" icon={<BellOutlined />} onClick={()=>navigate('/notifications')} /></Badge></Tooltip>
             <Tooltip title="帮助中心"><Button type="text" icon={<QuestionCircleOutlined />} onClick={()=>Modal.info({title:'智面帮助中心',content:'遇到数据或流程问题时，请先检查右上角接口状态，再联系系统管理员。'})} /></Tooltip>
-            <Select className="role-select" value={role} onChange={value=>setRole(value)} options={roles.map(value=>({value,label:value}))} />
-            <Dropdown menu={{items:[{key:'profile',label:'个人设置',icon:<UserOutlined />},{key:'setting',label:'通知偏好',icon:<SettingOutlined />},{type:'divider'},{key:'logout',label:'退出登录'}],onClick:({key})=>key==='logout'?Modal.confirm({title:'确认退出登录？',onOk:()=>navigate('/dashboard')}):navigate('/settings/system')}}>
-              <Space className="user-menu"><Avatar size={30}>周</Avatar><span>周谨言</span><DownOutlined /></Space>
+            <Tooltip title={`当前角色：${role}`}><Button type="text">{role}</Button></Tooltip>
+            <Dropdown menu={{items:[{key:'profile',label:'个人设置',icon:<UserOutlined />},{key:'setting',label:'通知偏好',icon:<SettingOutlined />},{type:'divider'},{key:'logout',label:'退出登录'}],onClick:({key})=>key==='logout'?Modal.confirm({title:'确认退出登录？',onOk:()=>logout()}):navigate('/settings/system')}}>
+              <Space className="user-menu"><Avatar size={30}>{user?.name?.slice(-1)||'用'}</Avatar><span>{user?.name||'当前用户'}</span><DownOutlined /></Space>
             </Dropdown>
           </Space>
         </Header>

@@ -2,10 +2,12 @@ import { createContext, useContext, useMemo, useState, type ReactNode } from 're
 
 export const roles = ['超级管理员','项目经理','岗位负责人','招聘专员','面试官','审核人员','数据观察员','外部客户'] as const;
 export type Role = typeof roles[number];
+export type CurrentUser = { id:string; name:string; role:Role; projectKeys?:string[]; jobKeys?:string[] };
 
 type ContextValue = {
   role: Role;
-  setRole: (role: Role) => void;
+  user?: CurrentUser;
+  setUser: (user?: CurrentUser) => void;
   compact: boolean;
   setCompact: (compact: boolean) => void;
   canEdit: boolean;
@@ -16,17 +18,15 @@ type ContextValue = {
 const AppContext = createContext<ContextValue | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [role, setRole] = useState<Role>('超级管理员');
+  const [user, setUser] = useState<CurrentUser>();
   const [compact, setCompact] = useState(false);
+  const role = user?.role || '数据观察员';
   const value = useMemo(() => ({
-    role, setRole, compact, setCompact,
-    canEdit: !['数据观察员','外部客户'].includes(role),
+    role, user, setUser, compact, setCompact,
+    canEdit: !['数据观察员','外部客户','面试官'].includes(role),
     canDelete: role === '超级管理员',
-    dataScope: role === '超级管理员' ? '全部组织数据' :
-      role === '项目经理' ? '本人负责的 3 个项目' :
-      role === '岗位负责人' ? '本人负责的 6 个岗位' :
-      role === '外部客户' ? '已授权的 1 个项目' : '已授权业务范围',
-  }), [role, compact]);
+    dataScope: role === '超级管理员' ? '全部组织数据' : '服务端授权的项目与岗位范围',
+  }), [role, user, compact]);
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
 

@@ -1,14 +1,13 @@
 import { useState, type ReactNode } from 'react';
 import { readSheet } from 'read-excel-file/browser';
 import {
-  Alert, Button, Card, Checkbox, Descriptions, Divider, Drawer, Empty, Form,
-  Input, message, Modal, Progress, Result, Select, Space, Spin, Steps, Table,
+  Alert, Button, Card, Descriptions, Divider, Drawer,
+  message, Modal, Progress, Result, Space, Steps, Table,
   Tag, Timeline, Tooltip, Upload,
 } from 'antd';
 import {
-  CheckCircleFilled, ClockCircleFilled, CloseCircleFilled, CloudUploadOutlined,
-  DownloadOutlined, ExclamationCircleFilled, EyeOutlined, FileExcelOutlined,
-  InboxOutlined, InfoCircleOutlined, ReloadOutlined,
+  CheckCircleFilled, ClockCircleFilled, CloseCircleFilled, DownloadOutlined,
+  FileExcelOutlined, InboxOutlined, InfoCircleOutlined,
 } from '@ant-design/icons';
 
 const colorMap: Record<string, string> = {
@@ -43,28 +42,17 @@ export function PageHeader({ title, description, extra }: { title:string; descri
   return <div className="page-heading"><div><h1>{title}</h1><p>{description}</p></div><Space>{extra}</Space></div>;
 }
 
-export function EmptyState({ type = 'empty', onRetry }: { type?:string; onRetry?:()=>void }) {
-  if (type === '403') return <Result status="403" title="暂无访问权限" subTitle="当前角色的数据范围不包含此页面" extra={<Button type="primary">申请权限</Button>} />;
-  if (type === 'error') return <Result status="error" title="数据加载失败" subTitle="网络连接异常，请稍后重试" extra={<Button icon={<ReloadOutlined />} onClick={onRetry}>重新加载</Button>} />;
-  return <Empty description={type === 'search' ? '未找到符合条件的数据' : '暂无数据'}><Button type="primary">创建第一条数据</Button></Empty>;
-}
-
 export function DetailDrawer({ open, onClose, title, record }: {
   open:boolean; onClose:()=>void; title:string; record?:Record<string, unknown>;
 }) {
   return (
-    <Drawer open={open} onClose={onClose} width={620} title={title} extra={<Button type="primary">查看完整详情</Button>}>
-      <Alert type="info" showIcon message="信息来自智面 ATS API，变更会持久化到本地数据文件" />
+    <Drawer open={open} onClose={onClose} width={620} title={title}>
+      <Alert type="info" showIcon message="信息来自智面 ATS API" />
       <Descriptions column={1} bordered size="small" style={{ marginTop:16 }}>
         {Object.entries(record || {}).filter(([k]) => k !== 'key').slice(0, 10).map(([k,v]) =>
           <Descriptions.Item key={k} label={k}>{String(v)}</Descriptions.Item>)}
       </Descriptions>
-      <Divider titlePlacement="start">操作时间线</Divider>
-      <Timeline items={[
-        { color:'blue', children:'今天 16:42 记录信息更新' },
-        { color:'green', children:'今天 14:18 系统校验通过' },
-        { color:'gray', children:'09-02 10:30 创建记录' },
-      ]} />
+      {Boolean(record?.updated)&&<><Divider titlePlacement="start">更新时间</Divider><Timeline items={[{color:'blue',children:String(record?.updated)}]}/></>}
     </Drawer>
   );
 }
@@ -131,16 +119,3 @@ export function ImportWizard({ open, onClose, onImport }: {
     </Modal>
   );
 }
-
-export function ExportModal({ open, onClose, selected = 0 }: { open:boolean; onClose:()=>void; selected?:number }) {
-  return <Modal open={open} onCancel={onClose} title="导出数据" okText="创建导出任务" onOk={()=>{message.success('导出任务已创建，可在下载中心查看进度');onClose();}}>
-    <Form layout="vertical"><Form.Item label="导出范围"><Select defaultValue={selected ? 'selected':'filtered'} options={[{value:'filtered',label:'当前筛选结果（预计 128 条）'},{value:'selected',label:`已选记录（${selected} 条）`,disabled:!selected}]} /></Form.Item><Form.Item label="导出字段"><Checkbox.Group defaultValue={['base','status','owner']} options={[{label:'基础信息',value:'base'},{label:'状态信息',value:'status'},{label:'负责人',value:'owner'},{label:'操作记录',value:'logs'}]} /></Form.Item><Alert message="手机号、邮箱等敏感字段将按当前角色权限自动脱敏。大数据量导出会转为后台任务。" type="info" showIcon /></Form>
-  </Modal>;
-}
-
-export function LoadingBlock() {
-  return <div className="loading-block"><Spin size="large" /><span>正在加载业务数据...</span></div>;
-}
-
-export const ActionButton = ({ onClick, children='查看详情' }: { onClick?:()=>void; children?:ReactNode }) =>
-  <Button type="link" size="small" icon={<EyeOutlined />} onClick={onClick}>{children}</Button>;

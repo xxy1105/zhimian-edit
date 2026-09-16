@@ -1,5 +1,5 @@
 import { Navigate, Route, Routes, useParams } from 'react-router-dom';
-import { Button, Card, Col, Descriptions, Progress, Row, Tabs, Timeline } from 'antd';
+import { Button, Card, Col, Progress, Row, Table, Tabs, message } from 'antd';
 import { AppLayout } from './components/AppLayout';
 import { PageHeader, StatCard, StatusTag } from './components/Common';
 import { Dashboard } from './pages/Dashboard';
@@ -8,7 +8,8 @@ import { GenericPage, JobPage, ProjectPage } from './pages/Management';
 import { AnalyticsDetail, AnalyticsPage, CalendarPage } from './pages/AnalyticsCalendar';
 import { AuditLogPage, NotificationTemplatesPage, OrganizationPage, RolesRosterPage, SystemConfigPage } from './pages/SystemPages';
 import { useData } from './context/DataContext';
-import type { Project } from './services/mock';
+
+type ProjectRecord={key:string;name:string;code?:string;client?:string;manager?:string;period?:string;updated?:string;status:string;progress:number;target:number;passed:number;jobs:number};
 
 const genericPaths = [
   '/approvals','/questions','/score-templates','/records',
@@ -17,13 +18,21 @@ const genericPaths = [
 ];
 
 function ProjectDetail() {
-  const { projects: projectRecords } = useData();
-  const projects = projectRecords as unknown as Project[];
+  const { projects: projectRecords,jobs,candidates,interviews,auditLogs,createRecord } = useData();
+  const projects = projectRecords as unknown as ProjectRecord[];
   const { id }=useParams(); const project=projects.find(x=>x.key===id)||projects[0];
   if (!project) return null;
-  return <div><PageHeader title={project.name} description={`${project.code} · ${project.client}`} extra={<><Button>提交审批</Button><Button type="primary">编辑项目</Button></>} /><Card className="detail-hero"><div><StatusTag status={project.status} /><h2>{project.manager} 负责</h2><p>{project.period} · 最后更新 {project.updated}</p></div><Progress type="circle" percent={project.progress} size={90}/></Card><Tabs items={[
-    {key:'overview',label:'概览',children:<><Row gutter={12} className="stats-row"><Col span={6}><StatCard label="目标人数" value={project.target}/></Col><Col span={6}><StatCard label="已通过" value={project.passed}/></Col><Col span={6}><StatCard label="招聘岗位" value={project.jobs}/></Col><Col span={6}><StatCard label="剩余天数" value="58"/></Col></Row><Card title="近期动态"><Timeline items={[{color:'green',children:'今天 16:42 通过 2 名候选人审核'},{color:'blue',children:'今天 14:18 云产品技术支持工程师岗位发布 V3.2'},{color:'orange',children:'昨天 18:30 检测到 1 条评分异常'}]}/></Card></>},
-    ...['岗位','候选人','面试进度','数据分析','成员权限','操作日志'].map((label,i)=>({key:String(i),label,children:<Card><Descriptions bordered><Descriptions.Item label="模块状态">数据已按项目范围过滤</Descriptions.Item><Descriptions.Item label="记录数量">{12+i*7}</Descriptions.Item><Descriptions.Item label="权限">可查看、编辑、导出</Descriptions.Item></Descriptions></Card>})),
+  const projectJobs=jobs.filter(item=>item.project===project.name);
+  const projectCandidates=candidates.filter(item=>item.project===project.name);
+  const projectInterviews=interviews.filter(item=>item.project===project.name);
+  const logs=auditLogs.filter(item=>String(item.object||'').includes(project.name)||item.module==='projects');
+  const submitApproval=async()=>{await createRecord('approvals',{name:`项目变更审批：${project.name}`,module:'项目管理',owner:project.manager,status:'待审批',project:project.name});message.success('审批申请已提交');};
+  return <div><PageHeader title={project.name} description={`${project.code} · ${project.client}`} extra={<Button onClick={()=>void submitApproval()}>提交审批</Button>} /><Card className="detail-hero"><div><StatusTag status={project.status} /><h2>{project.manager} 负责</h2><p>{project.period} · 最后更新 {project.updated}</p></div><Progress type="circle" percent={project.progress} size={90}/></Card><Tabs items={[
+    {key:'overview',label:'概览',children:<Row gutter={12} className="stats-row"><Col span={6}><StatCard label="目标人数" value={project.target}/></Col><Col span={6}><StatCard label="已通过" value={project.passed}/></Col><Col span={6}><StatCard label="招聘岗位" value={projectJobs.length}/></Col><Col span={6}><StatCard label="候选人数" value={projectCandidates.length}/></Col></Row>},
+    {key:'jobs',label:'岗位',children:<Table dataSource={projectJobs} columns={[{title:'岗位',dataIndex:'name'},{title:'负责人',dataIndex:'owner'},{title:'HC',dataIndex:'hc'},{title:'状态',dataIndex:'status'}]}/>},
+    {key:'candidates',label:'候选人',children:<Table dataSource={projectCandidates} columns={[{title:'候选人',dataIndex:'name'},{title:'岗位',dataIndex:'job'},{title:'负责人',dataIndex:'owner'},{title:'状态',dataIndex:'status'}]}/>},
+    {key:'interviews',label:'面试进度',children:<Table dataSource={projectInterviews} columns={[{title:'候选人',dataIndex:'candidate'},{title:'岗位',dataIndex:'job'},{title:'轮次',dataIndex:'round'},{title:'状态',dataIndex:'status'}]}/>},
+    {key:'logs',label:'操作日志',children:<Table dataSource={logs} columns={[{title:'时间',dataIndex:'time'},{title:'操作人',dataIndex:'user'},{title:'动作',dataIndex:'action'},{title:'摘要',dataIndex:'summary'}]}/>},
   ]}/></div>;
 }
 

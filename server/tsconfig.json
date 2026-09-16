@@ -10,6 +10,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["./**/*.ts", "../src/services/mock.ts"]
+  "include": ["./**/*.ts", "../src/services/fixtures.ts"]
 }
-
