@@ -178,12 +178,17 @@ export function createApp(store = new Store(), services?:{
   const larkCreateMeeting = services?.createLarkMeeting || createLarkMeeting;
   const larkGetMeetingResult = services?.getLarkMeetingResult || getLarkMeetingResult;
   const larkTestConnection = services?.testLarkConnection || testLarkConnection;
-  const allowedOrigins=(process.env.CORS_ORIGINS||'http://localhost:5173,http://127.0.0.1:5173').split(',').map(value=>value.trim());
+  const allowedOrigins=(process.env.CORS_ORIGINS||'http://localhost:5173,http://127.0.0.1:5173')
+    .split(',')
+    .map(value=>value.trim())
+    .filter(Boolean);
   app.use(cors({
     credentials:true,
     origin(origin,callback){
-      if(!origin||allowedOrigins.includes(origin))callback(null,true);
-      else callback(new Error('不允许的跨域来源'));
+      const developmentLoopback = process.env.NODE_ENV !== 'production'
+        && /^http:\/\/(?:localhost|127\.0\.0\.1):\d+$/.test(origin || '');
+      if(!origin||allowedOrigins.includes(origin)||developmentLoopback)callback(null,true);
+      else callback(Object.assign(new Error('不允许的跨域来源'),{status:403}));
     },
   }));
   app.use(cookieParser());

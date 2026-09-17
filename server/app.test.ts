@@ -53,6 +53,18 @@ after(async()=>{
 });
 
 describe('ATS API security and integrations',()=>{
+  it('allows dynamic loopback ports in development and rejects other origins',async()=>{
+    const local=await request(app).post('/api/auth/login')
+      .set('Origin','http://localhost:5174')
+      .send({username:'admin',password:'wrong'})
+      .expect(401);
+    assert.equal(local.headers['access-control-allow-origin'],'http://localhost:5174');
+    await request(app).post('/api/auth/login')
+      .set('Origin','https://evil.example.test')
+      .send({username:'admin',password:'wrong'})
+      .expect(403);
+  });
+
   it('rejects development default accounts in production',()=>{
     const previousNodeEnv=process.env.NODE_ENV;
     const previousUsers=process.env.AUTH_USERS_JSON;
