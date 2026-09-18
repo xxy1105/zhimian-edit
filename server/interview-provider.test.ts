@@ -72,6 +72,7 @@ describe('interview execution engine adapter', () => {
     const request = calls.at(-1);
     assert.equal(request?.url, 'https://engine.example.test/api/admin/interview-links');
     assert.equal(new Headers(request?.init.headers).get('X-API-Key'), 'test-key');
+    assert.equal(new Headers(request?.init.headers).get('Authorization'), 'Bearer test-key');
     const body = JSON.parse(String(request?.init.body));
     assert.equal(body.candidate_name, '测试选手');
     assert.equal(body.resume_text, '三年后端开发经验');

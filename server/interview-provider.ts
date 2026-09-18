@@ -78,6 +78,7 @@ async function providerRequest(path: string, init: RequestInit = {}) {
       headers: {
         'Content-Type': 'application/json',
         'X-API-Key': config.apiKey,
+        Authorization: `Bearer ${config.apiKey}`,
         ...init.headers,
       },
     });
